@@ -24,6 +24,10 @@ $(TARGET): $(OBJS)
 $(BINDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# run the program with arguments
+run: all
+	$(TARGET) --port=8000 --env=dev --telegram_url=https://google.com
+
 # clean up
 clean:
 	rm -rf $(BINDIR)
