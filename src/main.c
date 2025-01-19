@@ -9,11 +9,96 @@
 #define BUFFER_SIZE 8192
 #define DEFAULT_PORT 8080
 
+int server_sock = -1;
+
+typedef struct {
+  const char *key;
+  const char *value;
+} Json;
+
 typedef struct {
   int port;
   char *telegram_url;
   char *env;
 } Config;
+
+// construct the JSON from key-value pairs
+char *construct_json_response(Json fields[], size_t field_count) {
+  size_t buffer_size = BUFFER_SIZE;
+  char *json = malloc(buffer_size);
+  if (!json) {
+    perror("malloc");
+    exit(1);
+  }
+
+  strcpy(json, "{");
+  for (size_t i = 0; i < field_count; i++) {
+    size_t remaining_space = buffer_size - strlen(json) - 1;
+    char field[BUFFER_SIZE];
+    snprintf(
+      field,
+      sizeof(field),
+      "\"%s\": \"%s\"%s",
+      fields[i].key,
+      fields[i].value,
+      (i == field_count - 1) ? "" : ", "
+    );
+
+    if (strlen(field) >= remaining_space) {
+      buffer_size *= 2;
+      json = realloc(json, buffer_size);
+      if (!json) {
+        perror("realloc");
+        exit(1);
+      }
+    }
+
+    strcat(json, field);
+  }
+  strcat(json, "}");
+
+  return json;
+}
+
+// construct the HTTP response string dynamically
+char *construct_http_response(
+  int status_code,
+  const char *content_type,
+  const char *body
+) {
+  const char *status_text;
+  switch(status_code) {
+    case 200: status_text = "OK"; break;
+    case 400: status_text = "Bad Request"; break;
+    case 404: status_text = "Not Found"; break;
+    default: status_text = "Internal Server Error"; break;
+  }
+
+  size_t body_length = strlen(body);
+  size_t response_size = BUFFER_SIZE;
+  char *response = malloc(response_size);
+  if (!response) {
+    perror("malloc");
+    exit(1);
+  }
+
+  snprintf(
+    response,
+    response_size,
+    "HTTP/1.1 %d %s\r\n"
+    "Content-Type: %s\r\n"
+    "Content-Length: %zu\r\n"
+    "\r\n"
+    "%s",
+    status_code,
+    status_text,
+    content_type,
+    body_length,
+    body
+  );
+
+  return response;
+}
 
 void send_response(
   int client_sock,
@@ -21,21 +106,9 @@ void send_response(
   const char *content_type,
   const char *body
 ) {
-  char header[BUFFER_SIZE];
-  snprintf(
-    header, 
-    sizeof(header),
-    "HTTP/1.1 %d OK\r\n"
-    "Content-Type: %s\r\n"
-    "Content-Length: %zu\r\n"
-    "\r\n",
-    status_code,
-    content_type,
-    strlen(body)
-  );
-
-  send(client_sock, header, strlen(header), 0);
-  send(client_sock, body, strlen(body), 0);
+  char *response = construct_http_response(status_code, content_type, body);
+  send(client_sock, response, strlen(response), 0);
+  free(response);
 }
 
 void handle_client(int client_sock) {
@@ -65,14 +138,23 @@ void handle_client(int client_sock) {
 
   // handle different paths
   if (strcmp(path, "/hello") == 0) {
-    const char *json_body = "{\"message\": \"Hello, world!\"}\n";
+    Json fields[] = {{"message", "Hello, world!"}};
+    char *json_body = construct_json_response(fields, 1);
     send_response(client_sock, 200, "application/json", json_body);
+    free(json_body);
+  } else if (strcmp(path, "/doyoque") == 0) {
+    Json fields[] = {{"name", "Hello, world!"}, {"gender", "male"}};
+    char *json_body = construct_json_response(fields, 2);
+    send_response(client_sock, 200, "application/json", json_body);
+    free(json_body);
   } else if (strcmp(path, "/info") == 0) {
     const char *text_body = "This is a simple C HTTP server!\n";
     send_response(client_sock, 200, "text/plain", text_body);
   } else {
-    const char *not_found_body = "{\"error\": \"Not found\"}\n";
-    send_response(client_sock, 404, "application/json", not_found_body);
+    Json fields[] = {{"error", "Not Found"}};
+    char *json_body = construct_json_response(fields, 1);
+    send_response(client_sock, 404, "application/json", json_body);
+    free(json_body);
   }
 
   // close the connection
@@ -97,6 +179,17 @@ void parse_args(int argc, char *argv[], Config *config) {
   }
 }
 
+void handle_signal(int signal) {
+  if (signal == SIGINT) {
+    printf("\nShutting down the server gracefully...\n");
+    if (server_sock >= 0) {
+      close(server_sock);
+      printf("Server socket closed.\n");
+    }
+    exit(0);
+  }
+}
+
 int main(int argc, char *argv[]) {
   Config config;
 
@@ -107,12 +200,17 @@ int main(int argc, char *argv[]) {
   (void)server_addr;
   socklen_t client_len = sizeof(client_addr);
 
+  signal(SIGINT, handle_signal);
+
   // create the server socket
   server_sock = socket(AF_INET, SOCK_STREAM, 0);
   if (server_sock < 0) {
     perror("socket");
     return 1;
   }
+
+  int opt = 1;
+  setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
   // configure server address
   memset(&server_addr, 0, sizeof(server_addr));

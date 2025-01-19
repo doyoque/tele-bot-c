@@ -26,7 +26,7 @@ $(BINDIR)/%.o: $(SRCDIR)/%.c
 
 # run the program with arguments
 run: all
-	$(TARGET) --port=8000 --env=dev --telegram_url=https://google.com
+	$(TARGET) --port=8100 --env=dev --telegram_url=https://google.com
 
 # clean up
 clean:
