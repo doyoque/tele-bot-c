@@ -30,6 +30,6 @@ run: all
 
 # clean up
 clean:
-	rm -rf $(BINDIR)
+	rm -rf $(BINDIR)/main $(BINDIR)/main.o
 
 .PHONY: all clean
